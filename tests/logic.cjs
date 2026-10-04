@@ -1,0 +1,24 @@
+const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');const path=require('node:path');
+const elements={};const ids=['market','kind','carrier','date','change','tracking','reason','otherCarrier','dateField','reasonField','changeField','trackingField','dateLabel','trackingLabel','output','status','errors','form','copy','reset'];
+for(const id of ids)elements[id]={value:'',textContent:'',hidden:false,listeners:{},addEventListener(event,fn){this.listeners[event]=fn;},focus(){this.focused=true;},select(){this.selected=true;}};
+elements.market.value='ヤフオク';elements.kind.value='shipped';
+const context={document:{getElementById:id=>elements[id]},navigator:{clipboard:{writeText:async text=>{context.copied=text;}}}};vm.createContext(context);
+const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1],context);
+const generate=()=>elements.form.listeners.submit({preventDefault(){}});
+const changeKind=kind=>{elements.kind.value=kind;elements.kind.listeners.change();};
+(async()=>{
+ generate();assert.match(elements.errors.textContent,/運送会社/);assert.equal(elements.output.value,'');
+ Object.assign(elements.carrier,{value:'佐川急便'});elements.date.value='2026-10-05';elements.tracking.value='1234-5678-9012';generate();assert.match(elements.output.value,/ご落札/);assert.match(elements.output.value,/2026年10月5日に商品を発送/);
+ elements.market.value='メルカリShops';elements.form.listeners.input();assert.equal(elements.output.value,'');generate();assert.match(elements.output.value,/ご購入/);
+ changeKind('delay');generate();assert.match(elements.errors.textContent,/変更有無/);assert.match(elements.errors.textContent,/遅延理由/);
+ elements.reason.value='集荷漏れ';elements.change.value='same';generate();assert.match(elements.output.value,/変更はございません/);assert.match(elements.output.value,/発送する予定/);
+ elements.change.value='changed';generate();assert.match(elements.output.value,/新しい番号/);
+ elements.change.value='pending';elements.change.listeners.change();assert.equal(elements.trackingField.hidden,true);generate();assert.match(elements.output.value,/発送後に改めて/);assert.doesNotMatch(elements.output.value,/1234/);
+ changeKind('correction');elements.tracking.value='abc';generate();assert.match(elements.errors.textContent,/半角数字/);assert.equal(elements.output.value,'');
+ elements.tracking.value='9876-5432';generate();assert.match(elements.output.value,/正しい番号/);assert.doesNotMatch(elements.output.value,/2026年/);
+ elements.output.value='編集した連絡文';await elements.copy.listeners.click();assert.equal(context.copied,'編集した連絡文');
+ context.navigator.clipboard.writeText=async()=>{throw Error('unavailable');};await elements.copy.listeners.click();assert.equal(elements.output.selected,true);assert.match(elements.status.textContent,/Ctrl\+C/);
+ elements.carrier.value='other';elements.otherCarrier.value='テスト配送';generate();assert.match(elements.output.value,/テスト配送/);
+ elements.otherCarrier.value='';generate();assert.match(elements.errors.textContent,/運送会社/);
+ console.log('PASS: required fields, marketplaces, shipped/delay/correction, all tracking branches, invalid tracking, stale output clearing, edited text copying and fallback, custom carrier');
+})().catch(e=>{console.error(e);process.exitCode=1;});
